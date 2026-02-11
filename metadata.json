@@ -1,0 +1,5 @@
+{
+  "name": "Presenton K8s Edition",
+  "description": "An optimized, secure version of Presenton for on-prem Kubernetes environments, featuring advanced AI presentation generation and hardened security configurations.",
+  "requestFramePermissions": []
+}

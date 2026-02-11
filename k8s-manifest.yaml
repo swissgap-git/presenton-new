@@ -1,0 +1,113 @@
+
+# Optimized for eIAM (Swiss Federal Administration IDP)
+# Integration follows OIDC standard via Ingress-Nginx auth-url
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: presenton-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: eiam-oidc-secret
+  namespace: presenton-system
+type: Opaque
+data:
+  # Base64 encoded OIDC Client Secret provided by eIAM portal
+  client-secret: REPLACE_WITH_B64_SECRET
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: presenton-ingress
+  namespace: presenton-system
+  annotations:
+    # eIAM OIDC Integration via external-auth
+    nginx.ingress.kubernetes.io/auth-url: "https://auth.eiam.admin.ch/oidc/verify"
+    nginx.ingress.kubernetes.io/auth-signin: "https://auth.eiam.admin.ch/oidc/login?rd=$scheme://$http_host$request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-User-DisplayName, X-User-Roles, X-User-Organization"
+    # Security Headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Content-Security-Policy: default-src 'self' https://esm.sh https://cdn.tailwindcss.com https://fonts.googleapis.com https://fonts.gstatic.com data: blob:;";
+      more_set_headers "X-Frame-Options: DENY";
+spec:
+  rules:
+    - host: presenton.admin.ch
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: presenton-svc
+                port:
+                  number: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presenton-k8s
+  namespace: presenton-system
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: presenton
+  template:
+    metadata:
+      labels:
+        app: presenton
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: presenton
+          image: ghcr.io/presenton/presenton:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+          env:
+            - name: LLM
+              value: "google"
+            - name: ENVIRONMENT
+              value: "FEDERAL_PROD"
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-keys
+                  key: google-api-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: storage
+              mountPath: /app/user_data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: presenton-data
+        - name: tmp
+          emptyDir: {}
